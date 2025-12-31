@@ -86,9 +86,10 @@ public class Player implements Serializable, Runnable {
             if (nodeY != null && nodeY.isWalkable()) y = newY;
         }
         
-        // Clamp to bounds
-        x = Math.max(0.5, Math.min(24.5, x));
-        y = Math.max(0.5, Math.min(24.5, y));
+        // Clamp to map bounds (dynamic based on map size)
+        double mapBound = map.getSize() - 0.5;
+        x = Math.max(0.5, Math.min(mapBound, x));
+        y = Math.max(0.5, Math.min(mapBound, y));
     }
 
     public void updateVisuals() {

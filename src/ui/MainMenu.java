@@ -1,6 +1,7 @@
 package ui;
 
 import game.GameEngine;
+import util.GameSettings;
 import javafx.animation.*;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -18,6 +19,7 @@ import javafx.util.Duration;
 import java.util.*;
 
 public class MainMenu {
+    // No need for selectedDifficulty here; use GameSettings
     private Stage stage;
     private Canvas canvas;
     private GraphicsContext gc;
@@ -60,8 +62,8 @@ public class MainMenu {
         StackPane root = new StackPane();
         root.setStyle("-fx-background-color: #0a0a12;");
 
-        // Background canvas
-        canvas = new Canvas(1600, 1000);
+        // Background canvas - fullscreen size
+        canvas = new Canvas(1920, 1080);
         gc = canvas.getGraphicsContext2D();
         canvas.setMouseTransparent(true); // Allow mouse events to pass through to buttons
 
@@ -70,12 +72,13 @@ public class MainMenu {
 
         root.getChildren().addAll(canvas, content);
 
-        Scene scene = new Scene(root, 1600, 1000);
+        Scene scene = new Scene(root, 1920, 1080);
         scene.setFill(DARK_BG);
 
         stage.setScene(scene);
         stage.setTitle("CHRONOGRID - Cyberpunk Edition");
-        stage.setResizable(false);
+        stage.setFullScreen(true);
+        stage.setFullScreenExitHint(""); // Hide the "Press ESC to exit" message
         stage.show();
 
         startAnimation();
@@ -85,7 +88,6 @@ public class MainMenu {
         VBox content = new VBox(30);
         content.setAlignment(Pos.CENTER);
         content.setPadding(new Insets(60));
-        content.setMaxWidth(800); // Limit width to prevent stretching
 
         // Title with holographic effect
         StackPane titlePane = new StackPane();
@@ -283,24 +285,32 @@ public class MainMenu {
     }
 
     private void render() {
-        // Background gradient
+        double width = canvas.getWidth();
+        double height = canvas.getHeight();
+        if (width <= 0 || height <= 0) return;
+
+        // Background gradient sized to canvas
         LinearGradient bg = new LinearGradient(0, 0, 0.5, 1, true, CycleMethod.NO_CYCLE,
             new Stop(0, Color.web("#000814")),
             new Stop(0.5, Color.web("#001d3d")),
             new Stop(1, Color.web("#000814"))
         );
         gc.setFill(bg);
-        gc.fillRect(0, 0, 1600, 1000);
+        gc.fillRect(0, 0, width, height);
 
         // Grid
         gc.setStroke(Color.web("#00ffff", 0.05));
         gc.setLineWidth(1);
         double offset = (time * 30) % 50;
-        for (int i = -1; i < 35; i++) {
-            gc.strokeLine(i * 50 + offset, 0, i * 50 + offset, 1000);
+        int vLines = (int)Math.ceil(width / 50) + 2;
+        int hLines = (int)Math.ceil(height / 50) + 2;
+        for (int i = -1; i < vLines; i++) {
+            double x = i * 50 + offset;
+            gc.strokeLine(x, 0, x, height);
         }
-        for (int i = -1; i < 25; i++) {
-            gc.strokeLine(0, i * 50 + offset, 1600, i * 50 + offset);
+        for (int i = -1; i < hLines; i++) {
+            double y = i * 50 + offset;
+            gc.strokeLine(0, y, width, y);
         }
 
         // Particles
@@ -316,11 +326,11 @@ public class MainMenu {
         }
 
         // Horizontal scan line
-        double scanY = (time * 100) % 1200 - 100;
+        double scanY = (time * 100) % (height + 200) - 100;
         gc.setFill(Color.web("#00ffff", 0.1));
-        gc.fillRect(0, scanY, 1600, 3);
+        gc.fillRect(0, scanY, width, 3);
         gc.setFill(Color.web("#00ffff", 0.02));
-        gc.fillRect(0, scanY - 20, 1600, 40);
+        gc.fillRect(0, scanY - 20, width, 40);
     }
 
     private void startGame() {
@@ -371,8 +381,14 @@ public class MainMenu {
             StackPane diffBtn = createSmallButton(difficulties[i], diffColors[i]);
             final int diffIndex = i;
             diffBtn.setOnMouseClicked(e -> {
-                // TODO: Save difficulty setting
-                System.out.println("Difficulty set to: " + difficulties[diffIndex]);
+                GameSettings.Difficulty diff;
+                switch (diffIndex) {
+                    case 0: diff = GameSettings.Difficulty.EASY; break;
+                    case 1: diff = GameSettings.Difficulty.MEDIUM; break;
+                    case 2: diff = GameSettings.Difficulty.HARD; break;
+                    default: diff = GameSettings.Difficulty.MEDIUM;
+                }
+                GameSettings.setDifficulty(diff);
             });
             diffButtons.getChildren().add(diffBtn);
         }
@@ -418,7 +434,7 @@ public class MainMenu {
         ScrollPane scrollPane = new ScrollPane();
         scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
         scrollPane.setFitToWidth(true);
-        scrollPane.setPrefHeight(400);
+            scrollPane.setPrefHeight(400);
 
         VBox achievementList = new VBox(10);
         achievementList.setAlignment(Pos.TOP_CENTER);

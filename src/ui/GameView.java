@@ -20,6 +20,8 @@ import javafx.scene.paint.*;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.*;
 import javafx.stage.Stage;
+import javafx.stage.Screen;
+import javafx.geometry.Rectangle2D;
 import javafx.util.Duration;
 import java.util.*;
 
@@ -31,10 +33,17 @@ public class GameView {
     private Player player;
     private AnimationTimer gameLoop;
     
-    // Screen - Optimized for 1920x1080
-    private static final int GAME_WIDTH = 1200;
-    private static final int GAME_HEIGHT = 850;
-    private static final double TILE_SIZE = 36;
+    // Screen - Dynamic sizing based on actual screen
+    private double screenWidth;
+    private double screenHeight;
+    private double gameWidth;
+    private double  gameHeight;
+    private double tileSize;
+    
+    // Layout proportions
+    private static final double RIGHT_PANEL_RATIO = 0.15;
+    private static final double TOP_HUD_RATIO = 0.08;
+    private static final double BOTTOM_HUD_RATIO = 0.08;
     
     // Camera
     private double cameraX = 0, cameraY = 0;
@@ -47,7 +56,7 @@ public class GameView {
     private List<Notification> notifications = new ArrayList<>();
     
     // Enhanced Features
-    private MiniMap miniMap;
+    // private MiniMap miniMap; // Removed extra minimap overlay
     private TimelineShiftIndicator timelineIndicator;
     private ComboSystem comboSystem;
     private PowerUpDisplay powerUpDisplay;
@@ -106,57 +115,96 @@ public class GameView {
     }
 
     public void show() {
+        // === 1. GET SCREEN SIZE DYNAMICALLY ===
+        Rectangle2D screen = Screen.getPrimary().getVisualBounds();
+        screenWidth = screen.getWidth();
+        screenHeight = screen.getHeight();
+        
+        // === 2. CALCULATE LAYOUT PROPORTIONALLY ===
+        double rightPanelWidth = Math.min(300, Math.max(220, screenWidth * RIGHT_PANEL_RATIO));
+        double topHudHeight = screenHeight * TOP_HUD_RATIO;
+        double bottomHudHeight = screenHeight * BOTTOM_HUD_RATIO;
+        
+        // Game canvas fills all center area (including behind right panel)
+        gameWidth = screenWidth;
+        gameHeight = screenHeight - topHudHeight - bottomHudHeight;
+        
+        // Calculate tile size based on canvas and map size (25x25 grid)
+        tileSize = Math.min(gameWidth / 28, gameHeight / 28);
+        // === ROOT LAYOUT ===
         BorderPane root = new BorderPane();
         root.setStyle("-fx-background-color: #0d1117;");
 
-        // === TOP HUD - Like reference image ===
+        // === TOP HUD (8% of screen height) ===
         HBox topHUD = createTopHUD();
+        topHUD.setPrefHeight(topHudHeight);
+        topHUD.setMinHeight(topHudHeight);
+        topHUD.setMaxHeight(topHudHeight);
+        topHUD.setStyle("-fx-background-color: rgba(0, 0, 0, 0.7); -fx-padding: 10;");
         
-        // === CENTER: Game Area ===
-        StackPane gameArea = new StackPane();
-        gameArea.setStyle("-fx-background-color: transparent;");
-        gameArea.setPadding(new Insets(10));
+        // === BOTTOM HUD (8% of screen height) ===
+        HBox bottomHUD = createBottomHUD();
+        bottomHUD.setPrefHeight(bottomHudHeight);
+        bottomHUD.setMinHeight(bottomHudHeight);
+        bottomHUD.setMaxHeight(bottomHudHeight);
+        bottomHUD.setStyle("-fx-background-color: rgba(0, 0, 0, 0.7); -fx-padding: 10;");
         
-        gameCanvas = new Canvas(GAME_WIDTH, GAME_HEIGHT);
+        // === GAME CANVAS - Dynamic size ===
+        gameCanvas = new Canvas(gameWidth, gameHeight);
         gc = gameCanvas.getGraphicsContext2D();
         
-        // Game frame with subtle border
-        StackPane canvasHolder = new StackPane();
-        canvasHolder.setStyle("-fx-background-color: #0a0f14; -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 4; -fx-background-radius: 4;");
-        canvasHolder.setPadding(new Insets(4));
-        canvasHolder.getChildren().add(gameCanvas);
-        canvasHolder.setMaxSize(GAME_WIDTH + 10, GAME_HEIGHT + 10);
-        
-        gameArea.getChildren().add(canvasHolder);
-        
-        // === RIGHT PANEL - Strategic Map & Threat Level ===
+        // === RIGHT PANEL (15% of screen, min 220, max 300) ===
         VBox rightPanel = createRightPanel();
-        
-        // === BOTTOM HUD (hidden, but create bars for tracking) ===
-        HBox bottomHUD = createBottomHUD();
+        rightPanel.setPrefWidth(rightPanelWidth);
+        rightPanel.setMinWidth(220);
+        rightPanel.setMaxWidth(300);
+        rightPanel.setStyle("-fx-background-color: rgba(0, 0, 0, 0.6);");
         
         // Notification area
         notificationArea = new VBox(10);
         notificationArea.setAlignment(Pos.TOP_CENTER);
-        notificationArea.setPadding(new Insets(20));
+        notificationArea.setPadding(new Insets(20, 0, 0, 0));
         notificationArea.setPickOnBounds(false);
         notificationArea.setMouseTransparent(true);
         
-        StackPane centerStack = new StackPane();
-        centerStack.getChildren().addAll(gameArea, notificationArea);
+        // === CENTER STACK: Game Canvas + Right Panel overlay ===
+        StackPane centerPane = new StackPane(gameCanvas, rightPanel, notificationArea);
+        StackPane.setAlignment(rightPanel, Pos.CENTER_RIGHT);
         StackPane.setAlignment(notificationArea, Pos.TOP_CENTER);
         
+        // === 3. BIND SIZES FOR AUTO-RESIZE ===
+        // Canvas resizes with window (fills all center area)
+        gameCanvas.widthProperty().bind(centerPane.widthProperty());
+        gameCanvas.heightProperty().bind(centerPane.heightProperty());
+        
+        // Update gameWidth/gameHeight when canvas resizes
+        gameCanvas.widthProperty().addListener((obs, oldVal, newVal) -> {
+            gameWidth = newVal.doubleValue();
+            tileSize = Math.min(gameWidth / 28, gameHeight / 28);
+        });
+        gameCanvas.heightProperty().addListener((obs, oldVal, newVal) -> {
+            gameHeight = newVal.doubleValue();
+            tileSize = Math.min(gameWidth / 28, gameHeight / 28);
+        });
+        
+        // Right panel width bound to root
+        rightPanel.prefWidthProperty().bind(root.widthProperty().multiply(RIGHT_PANEL_RATIO));
+        
         root.setTop(topHUD);
-        root.setCenter(centerStack);
-        root.setRight(rightPanel);
         root.setBottom(bottomHUD);
+        root.setCenter(centerPane);
 
-        // Fit to 1920x1080 screen with some margin
-        Scene scene = new Scene(root, 1880, 1000);
+        // === FULLSCREEN SAFE MODE ===
+        // Use maximized window instead of exclusive fullscreen for better compatibility
+        Scene scene = new Scene(root, screenWidth, screenHeight);
         scene.setFill(Color.web("#0d1117"));
         
-        // Make window maximized/fullscreen friendly
+        // Maximized windowed mode (safer than exclusive fullscreen)
         stage.setMaximized(true);
+        stage.setResizable(true);
+        // Uncomment below for true fullscreen if needed:
+        // stage.setFullScreen(true);
+        // stage.setFullScreenExitHint("");
         
         // Input handlers
         scene.setOnKeyPressed(e -> keys.add(e.getCode()));
@@ -188,8 +236,8 @@ public class GameView {
         mouseY = sy - canvasTop;
         
         // Calculate aim angle
-        double playerScreenX = player.getVisualX() * TILE_SIZE - cameraX + TILE_SIZE/2;
-        double playerScreenY = player.getVisualY() * TILE_SIZE - cameraY + TILE_SIZE/2;
+        double playerScreenX = player.getVisualX() * tileSize - cameraX + tileSize/2;
+        double playerScreenY = player.getVisualY() * tileSize - cameraY + tileSize/2;
         player.setAimAngle(Math.atan2(mouseY - playerScreenY, mouseX - playerScreenX));
     }
     
@@ -287,7 +335,7 @@ public class GameView {
     private VBox createCyberResourceBar(String name, Color accentColor, int max) {
         VBox box = new VBox(8);
         box.setAlignment(Pos.CENTER);
-        box.setPrefWidth(200);
+        box.setMaxWidth(Double.MAX_VALUE);
         box.setPadding(new Insets(10));
         
         Text label = new Text(name);
@@ -307,13 +355,13 @@ public class GameView {
     private VBox createRightPanel() {
         VBox panel = new VBox(12);
         panel.setPadding(new Insets(10));
-        panel.setPrefWidth(320);
-        panel.setMaxWidth(320);
-        panel.setStyle("-fx-background-color: #0d1117;");
+        panel.setPrefWidth(280);
+        panel.setMaxWidth(280);
+        panel.setStyle("-fx-background-color: rgba(13, 17, 23, 0.9);");
         
         // === GAME STATS SECTION ===
         VBox statsSection = new VBox(6);
-        statsSection.setStyle("-fx-background-color: #0a1628; -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
+        statsSection.setStyle("-fx-background-color: rgba(10, 22, 40, 0.95); -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
         statsSection.setPadding(new Insets(10));
         
         HBox statsHeader = new HBox(8);
@@ -345,7 +393,7 @@ public class GameView {
         
         // === COOLDOWNS SECTION ===
         VBox cooldownSection = new VBox(6);
-        cooldownSection.setStyle("-fx-background-color: #0a1628; -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
+        cooldownSection.setStyle("-fx-background-color: rgba(10, 22, 40, 0.95); -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
         cooldownSection.setPadding(new Insets(10));
         
         HBox cdHeader = new HBox(8);
@@ -367,7 +415,7 @@ public class GameView {
         
         // === STRATEGIC MAP ===
         VBox mapSection = new VBox(8);
-        mapSection.setStyle("-fx-background-color: #0a1628; -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
+        mapSection.setStyle("-fx-background-color: rgba(10, 22, 40, 0.95); -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
         mapSection.setPadding(new Insets(10));
         
         HBox mapHeader = new HBox(8);
@@ -379,14 +427,14 @@ public class GameView {
         mapTitle.setFill(Color.web("#06b6d4"));
         mapHeader.getChildren().addAll(mapIcon, mapTitle);
         
-        strategicMapCanvas = new Canvas(290, 160);
+        strategicMapCanvas = new Canvas(250, 140);
         drawStrategicMap(strategicMapCanvas.getGraphicsContext2D());
         
         mapSection.getChildren().addAll(mapHeader, strategicMapCanvas);
         
         // === THREAT LEVEL ===
         VBox threatSection = new VBox(8);
-        threatSection.setStyle("-fx-background-color: #0a1628; -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
+        threatSection.setStyle("-fx-background-color: rgba(10, 22, 40, 0.95); -fx-border-color: #1e3a5f; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
         threatSection.setPadding(new Insets(10));
         
         HBox threatHeader = new HBox(8);
@@ -399,7 +447,7 @@ public class GameView {
         threatTitle.setFill(Color.web("#ef4444"));
         threatHeader.getChildren().addAll(threatIcon, threatTitle);
         
-        threatLevelCanvas = new Canvas(290, 120);
+        threatLevelCanvas = new Canvas(250, 100);
         drawThreatLevel(threatLevelCanvas.getGraphicsContext2D());
         
         threatSection.getChildren().addAll(threatHeader, threatLevelCanvas);
@@ -432,10 +480,10 @@ public class GameView {
         label.setFill(Color.web("#888888"));
         
         StackPane barBg = new StackPane();
-        barBg.setPrefSize(280, 14);
+        barBg.setPrefSize(240, 14);
         barBg.setStyle("-fx-background-color: #1a2a35; -fx-background-radius: 6;");
         
-        Rectangle fill = new Rectangle(280, 14);
+        Rectangle fill = new Rectangle(240, 14);
         fill.setFill(Color.web(color));
         fill.setArcWidth(6);
         fill.setArcHeight(6);
@@ -449,7 +497,7 @@ public class GameView {
     }
     
     private void drawStrategicMap(GraphicsContext mgc) {
-        double mapWidth = 290, mapHeight = 160;
+        double mapWidth = 250, mapHeight = 140;
         
         // Dark background
         mgc.setFill(Color.web("#0f172a"));
@@ -472,20 +520,20 @@ public class GameView {
         // Draw collectibles as colored dots
         for (Collectible c : engine.getCollectibles()) {
             String color;
-            switch (c.type) {
+            switch (c.getType()) {
                 case HEALTH: color = "#ef4444"; break;
                 case ENERGY: color = "#fbbf24"; break;
                 case AMMO: color = "#06b6d4"; break;
                 default: color = "#a855f7";
             }
             mgc.setFill(Color.web(color));
-            mgc.fillOval(c.x * scale - 2, c.y * scaleY - 2, 5, 5);
+            mgc.fillOval(c.getX() * scale - 2, c.getY() * scaleY - 2, 5, 5);
         }
         
         // Draw enemies as colored dots
         for (Enemy e : engine.getEnemies()) {
             String color;
-            switch (e.type) {
+            switch (e.getType()) {
                 case CHASER: color = "#10b981"; break;
                 case SHOOTER: color = "#fbbf24"; break;
                 case TANK: color = "#6b7280"; break;
@@ -493,7 +541,7 @@ public class GameView {
                 default: color = "#f97316";
             }
             mgc.setFill(Color.web(color));
-            mgc.fillOval(e.x * scale - 3, e.y * scaleY - 3, 7, 7);
+            mgc.fillOval(e.getX() * scale - 3, e.getY() * scaleY - 3, 7, 7);
         }
         
         // Draw player (yellow with glow effect)
@@ -511,7 +559,7 @@ public class GameView {
     }
     
     private void drawThreatLevel(GraphicsContext tgc) {
-        double mapWidth = 290, mapHeight = 120;
+        double mapWidth = 250, mapHeight = 100;
         
         // Dark background
         tgc.setFill(Color.web("#0f172a"));
@@ -534,12 +582,12 @@ public class GameView {
                 // Count nearby enemies and their threat
                 double threat = 0;
                 for (Enemy e : engine.getEnemies()) {
-                    double dist = Math.sqrt(Math.pow(e.x - centerX, 2) + Math.pow(e.y - centerY, 2));
+                    double dist = Math.sqrt(Math.pow(e.getX() - centerX, 2) + Math.pow(e.getY() - centerY, 2));
                     if (dist < 5) {
                         double threatValue = 1.0;
-                        if (e.type == EnemyType.BOSS) threatValue = 3.0;
-                        else if (e.type == EnemyType.TANK) threatValue = 2.0;
-                        else if (e.type == EnemyType.SHOOTER) threatValue = 1.5;
+                        if (e.getType() == EnemyType.BOSS) threatValue = 3.0;
+                        else if (e.getType() == EnemyType.TANK) threatValue = 2.0;
+                        else if (e.getType() == EnemyType.SHOOTER) threatValue = 1.5;
                         threat += threatValue * (5 - dist) / 5;
                     }
                 }
@@ -612,25 +660,56 @@ public class GameView {
         
         if (paused) return;
         
+        // === MOVEMENT (WASD) ===
         double dx = 0, dy = 0;
-        if (keys.contains(KeyCode.W) || keys.contains(KeyCode.UP)) dy = -1;
-        if (keys.contains(KeyCode.S) || keys.contains(KeyCode.DOWN)) dy = 1;
-        if (keys.contains(KeyCode.A) || keys.contains(KeyCode.LEFT)) dx = -1;
-        if (keys.contains(KeyCode.D) || keys.contains(KeyCode.RIGHT)) dx = 1;
+        if (keys.contains(KeyCode.W)) dy = -1;
+        if (keys.contains(KeyCode.S)) dy = 1;
+        if (keys.contains(KeyCode.A)) dx = -1;
+        if (keys.contains(KeyCode.D)) dx = 1;
         
         if (dx != 0 || dy != 0) {
             double len = Math.sqrt(dx*dx + dy*dy);
             player.move(dx/len, dy/len);
         }
         
-        if (keys.contains(KeyCode.DIGIT1)) switchTimeline("PAST");
-        if (keys.contains(KeyCode.DIGIT2)) switchTimeline("PRESENT");
-        if (keys.contains(KeyCode.DIGIT3)) switchTimeline("FUTURE");
-        if (keys.contains(KeyCode.Q)) doUltimate();
-        if (keys.contains(KeyCode.R)) quickRestart(); // Quick restart
-        if (keys.contains(KeyCode.TAB)) showQuickStats(); // Quick stats toggle
+        // === AIMING (Arrow Keys) - Keyboard aiming ===
+        double aimDx = 0, aimDy = 0;
+        if (keys.contains(KeyCode.UP)) aimDy = -1;
+        if (keys.contains(KeyCode.DOWN)) aimDy = 1;
+        if (keys.contains(KeyCode.LEFT)) aimDx = -1;
+        if (keys.contains(KeyCode.RIGHT)) aimDx = 1;
         
-        // Auto-fire while holding mouse
+        if (aimDx != 0 || aimDy != 0) {
+            player.setAimAngle(Math.atan2(aimDy, aimDx));
+        }
+        
+        // === SHOOTING (SPACE or J) ===
+        if (keys.contains(KeyCode.SPACE) || keys.contains(KeyCode.J)) {
+            doShoot();
+        }
+        
+        // === DASH (SHIFT or K) ===
+        if (keys.contains(KeyCode.SHIFT) || keys.contains(KeyCode.K)) {
+            doDash();
+        }
+        
+        // === ULTIMATE (Q or L) ===
+        if (keys.contains(KeyCode.Q) || keys.contains(KeyCode.L)) {
+            doUltimate();
+        }
+        
+        // === TIMELINE SWITCH (1/2/3 or Z/X/C) ===
+        if (keys.contains(KeyCode.DIGIT1) || keys.contains(KeyCode.Z)) switchTimeline("PAST");
+        if (keys.contains(KeyCode.DIGIT2) || keys.contains(KeyCode.X)) switchTimeline("PRESENT");
+        if (keys.contains(KeyCode.DIGIT3) || keys.contains(KeyCode.C)) switchTimeline("FUTURE");
+        
+        // === QUICK RESTART (R) ===
+        if (keys.contains(KeyCode.R)) quickRestart();
+        
+        // === QUICK STATS (TAB) ===
+        if (keys.contains(KeyCode.TAB)) showQuickStats();
+        
+        // === ALTERNATE: Mouse controls (optional) ===
         if (mouseDown) {
             doShoot();
         }
@@ -673,7 +752,7 @@ public class GameView {
         lastDashTime = now;
         addShake(8);
         screenEffects.add(new ScreenEffect("#00ffff", 15));
-        addFloatingText("DASH!", GAME_WIDTH/2, GAME_HEIGHT/2 - 50, NEON_CYAN);
+        addFloatingText("DASH!", gameWidth/2, gameHeight/2 - 50, NEON_CYAN);
     }
     
     private void doUltimate() {
@@ -712,7 +791,7 @@ public class GameView {
         
         // Score based on enemy type
         int scoreGain;
-        switch (e.type) {
+        switch (e.getType()) {
             case BOSS: scoreGain = 500; break;
             case TANK: scoreGain = 200; break;
             case SHOOTER: scoreGain = 150; break;
@@ -723,7 +802,7 @@ public class GameView {
         engine.addScore(scoreGain);
         
         // Floating score text
-        addFloatingText("+" + scoreGain, e.visualX * TILE_SIZE - cameraX, e.visualY * TILE_SIZE - cameraY, NEON_GOLD);
+        addFloatingText("+" + scoreGain, e.getVisualX() * tileSize - cameraX, e.getVisualY() * tileSize - cameraY, NEON_GOLD);
         
         // Check wave completion
         if (currentWaveKills >= waveKillsRequired) {
@@ -741,7 +820,7 @@ public class GameView {
         
         // Bonus points
         engine.addScore(engine.getWave() * 100);
-        addFloatingText("WAVE BONUS +" + (engine.getWave() * 100), GAME_WIDTH/2, GAME_HEIGHT/2, NEON_GREEN);
+        addFloatingText("WAVE BONUS +" + (engine.getWave() * 100), gameWidth/2, gameHeight/2, NEON_GREEN);
         
         // Add power-up for completing wave
         if (powerUpDisplay != null) {
@@ -800,12 +879,12 @@ public class GameView {
         if (c != null) applyCollectible(c);
         
         // Camera
-        double targetCamX = player.getVisualX() * TILE_SIZE - GAME_WIDTH/2 + TILE_SIZE/2;
-        double targetCamY = player.getVisualY() * TILE_SIZE - GAME_HEIGHT/2 + TILE_SIZE/2;
+        double targetCamX = player.getVisualX() * tileSize - gameWidth/2 + tileSize/2;
+        double targetCamY = player.getVisualY() * tileSize - gameHeight/2 + tileSize/2;
         cameraX += (targetCamX - cameraX) * 0.08;
         cameraY += (targetCamY - cameraY) * 0.08;
         
-        double maxCam = engine.getMap().getSize() * TILE_SIZE - GAME_WIDTH;
+        double maxCam = engine.getMap().getSize() * tileSize - gameWidth;
         cameraX = Math.max(0, Math.min(maxCam, cameraX));
         cameraY = Math.max(0, Math.min(maxCam, cameraY));
         
@@ -838,33 +917,33 @@ public class GameView {
             Projectile p = pi.next();
             
             // Wall collision
-            Node node = engine.getMap().getNode((int)p.x, (int)p.y);
+            Node node = engine.getMap().getNode((int)p.getX(), (int)p.getY());
             if (node == null || !node.isWalkable()) {
-                engine.spawnParticles(p.x, p.y, "spark", 5);
+                engine.spawnParticles(p.getX(), p.getY(), "spark", 5);
                 pi.remove();
                 continue;
             }
             
-            if (p.isPlayer) {
+            if (p.isPlayer()) {
                 Iterator<Enemy> ei = enemies.iterator();
                 while (ei.hasNext()) {
                     Enemy e = ei.next();
-                    if (dist(p.x, p.y, e.x, e.y) < 0.8) {
+                    if (dist(p.getX(), p.getY(), e.getX(), e.getY()) < 0.8) {
                         e.takeDamage(player.getDamage(), engine);
-                        engine.spawnParticles(p.x, p.y, "hit", 8);
+                        engine.spawnParticles(p.getX(), p.getY(), "hit", 8);
                         
                         // Add damage indicator
                         if (damageIndicators != null) {
-                            damageIndicators.addIndicator(e.visualX * TILE_SIZE - cameraX, 
-                                e.visualY * TILE_SIZE - cameraY, player.getDamage(), false);
+                            damageIndicators.addIndicator(e.getVisualX() * tileSize - cameraX, 
+                                e.getVisualY() * tileSize - cameraY, player.getDamage(), false);
                         }
                         
                         pi.remove();
                         
                         if (e.isDead()) {
                             onEnemyKilled(e);
-                            engine.spawnParticles(e.x, e.y, "explosion", 25);
-                            addShake(e.type == EnemyType.BOSS ? 20 : 8);
+                            engine.spawnParticles(e.getX(), e.getY(), "explosion", 25);
+                            addShake(e.getType() == EnemyType.BOSS ? 20 : 8);
                             screenEffects.add(new ScreenEffect("#ffffff", 8));
                             ei.remove();
                         }
@@ -872,14 +951,14 @@ public class GameView {
                     }
                 }
             } else {
-                if (dist(p.x, p.y, player.getX(), player.getY()) < 0.6) {
+                if (dist(p.getX(), p.getY(), player.getX(), player.getY()) < 0.6) {
                     player.takeDamage(5, engine);
                     addShake(5);
                     screenEffects.add(new ScreenEffect("#ef4444", 10));
                     
                     // Add damage indicator for player
                     if (damageIndicators != null) {
-                        damageIndicators.addIndicator(GAME_WIDTH/2, GAME_HEIGHT/2, 5, true);
+                        damageIndicators.addIndicator(gameWidth/2, gameHeight/2, 5, true);
                     }
                     
                     pi.remove();
@@ -889,26 +968,26 @@ public class GameView {
         
         // Enemy-player collision
         for (Enemy e : enemies) {
-            if (dist(e.x, e.y, player.getX(), player.getY()) < 0.7) {
-                player.takeDamage(e.type.damage, engine);
+            if (dist(e.getX(), e.getY(), player.getX(), player.getY()) < 0.7) {
+                player.takeDamage(e.getType().damage, engine);
                 addShake(8);
                 screenEffects.add(new ScreenEffect("#ef4444", 12));
                 
                 // Add damage indicator
                 if (damageIndicators != null) {
-                    damageIndicators.addIndicator(GAME_WIDTH/2, GAME_HEIGHT/2, e.type.damage, true);
+                    damageIndicators.addIndicator(gameWidth/2, gameHeight/2, e.getType().damage, true);
                 }
             }
         }
         
         // Trap-player collision
         for (Trap t : engine.getTraps()) {
-            if (dist(t.x, t.y, player.getX(), player.getY()) < 0.8) {
-                if (System.currentTimeMillis() - t.lastDamage > 1000) { // Damage once per second
-                    player.takeDamage(t.type.damage, engine);
+            if (dist(t.getX(), t.getY(), player.getX(), player.getY()) < 0.8) {
+                if (System.currentTimeMillis() - t.getLastDamage() > 1000) { // Damage once per second
+                    player.takeDamage(t.getType().damage, engine);
                     addShake(3);
                     screenEffects.add(new ScreenEffect("#8b5cf6", 8));
-                    t.lastDamage = System.currentTimeMillis();
+                    t.setLastDamage(System.currentTimeMillis());
                 }
             }
         }
@@ -921,7 +1000,7 @@ public class GameView {
     private void applyCollectible(Collectible c) {
         String msg = "";
         String color = "#ffffff";
-        switch (c.type) {
+        switch (c.getType()) {
             case HEALTH: player.heal(30); msg = "+30 HP"; color = "#ef4444"; break;
             case ENERGY: player.addEnergy(50); msg = "+50 ENERGY"; color = "#fbbf24"; break;
             case AMMO: player.addAmmo(20); msg = "+20 AMMO"; color = "#00ffff"; break;
@@ -943,7 +1022,7 @@ public class GameView {
                 break;
         }
         showNotification(msg, color);
-        engine.spawnParticles(c.x, c.y, "collect", 15);
+        engine.spawnParticles(c.getX(), c.getY(), "collect", 15);
     }
     
     private void updateHUD() {
@@ -1010,7 +1089,7 @@ public class GameView {
             if (fill != null) {
                 long elapsed = now - lastDashTime;
                 double progress = Math.min(1.0, (double) elapsed / DASH_COOLDOWN);
-                fill.setWidth(280 * progress);
+                fill.setWidth(240 * progress);
                 fill.setFill(progress >= 1.0 ? Color.web("#00ffff") : Color.web("#00ffff", 0.5));
             }
         }
@@ -1021,23 +1100,15 @@ public class GameView {
             if (fill != null) {
                 long elapsed = now - lastUltimateTime;
                 double progress = Math.min(1.0, (double) elapsed / ULTIMATE_COOLDOWN);
-                double chargeProgress = player.getUltimateCharge() / 100.0;
-                fill.setWidth(280 * Math.min(progress, chargeProgress));
-                
-                // Gold when ready, otherwise dim
-                boolean ready = progress >= 1.0 && player.getUltimateCharge() >= 100;
-                fill.setFill(ready ? Color.web("#ffd700") : Color.web("#ffd700", 0.4));
+                fill.setWidth(240 * progress);
+                fill.setFill(progress >= 1.0 ? Color.web("#ffd700") : Color.web("#ffd700", 0.5));
             }
         }
     }
-    
+
     private void render() {
-        gc.save();
-        gc.translate(shakeX, shakeY);
-        
-        // Background - dark like reference
         gc.setFill(Color.web("#0a0f14"));
-        gc.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        gc.fillRect(0, 0, gameWidth, gameHeight);
         
         // Get timeline theme - teal/green color scheme like reference
         Color floorA, floorB, wallMain, wallLight, accent;
@@ -1063,37 +1134,37 @@ public class GameView {
         // Draw tiles
         for (int i = 0; i < map.getSize(); i++) {
             for (int j = 0; j < map.getSize(); j++) {
-                double sx = i * TILE_SIZE - cameraX;
-                double sy = j * TILE_SIZE - cameraY;
+                double sx = i * tileSize - cameraX;
+                double sy = j * tileSize - cameraY;
                 
-                if (sx < -TILE_SIZE || sx > GAME_WIDTH || sy < -TILE_SIZE || sy > GAME_HEIGHT) continue;
+                if (sx < -tileSize || sx > gameWidth || sy < -tileSize || sy > gameHeight) continue;
                 
                 Node node = map.getNode(i, j);
                 
                 if (node.isWalkable()) {
                     gc.setFill((i + j) % 2 == 0 ? floorA : floorB);
-                    gc.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+                    gc.fillRect(sx, sy, tileSize, tileSize);
                 } else {
                     // Wall with 3D effect
                     gc.setFill(wallMain);
-                    gc.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+                    gc.fillRect(sx, sy, tileSize, tileSize);
                     gc.setFill(wallLight);
-                    gc.fillRect(sx, sy, TILE_SIZE, 5);
-                    gc.fillRect(sx, sy, 5, TILE_SIZE);
+                    gc.fillRect(sx, sy, tileSize, 5);
+                    gc.fillRect(sx, sy, 5, tileSize);
                     gc.setFill(Color.web("#000", 0.3));
-                    gc.fillRect(sx, sy + TILE_SIZE - 5, TILE_SIZE, 5);
-                    gc.fillRect(sx + TILE_SIZE - 5, sy, 5, TILE_SIZE);
+                    gc.fillRect(sx, sy + tileSize - 5, tileSize, 5);
+                    gc.fillRect(sx + tileSize - 5, sy, 5, tileSize);
                 }
             }
         }
         
         // Draw collectibles - yellow dots like reference
         for (Collectible c : engine.getCollectibles()) {
-            double sx = c.x * TILE_SIZE - cameraX + TILE_SIZE/2;
-            double sy = c.y * TILE_SIZE - cameraY + TILE_SIZE/2 + Math.sin(time * 3 + c.bobOffset) * 3;
+            double sx = c.getX() * tileSize - cameraX + tileSize/2;
+            double sy = c.getY() * tileSize - cameraY + tileSize/2 + Math.sin(time * 3 + c.getBobOffset()) * 3;
             
             String color;
-            switch (c.type) {
+            switch (c.getType()) {
                 case HEALTH: color = "#ef4444"; break;
                 case ENERGY: color = "#fbbf24"; break;
                 case AMMO: color = "#06b6d4"; break;
@@ -1117,11 +1188,11 @@ public class GameView {
         
         // Draw traps
         for (Trap t : engine.getTraps()) {
-            double sx = t.x * TILE_SIZE - cameraX + TILE_SIZE/2;
-            double sy = t.y * TILE_SIZE - cameraY + TILE_SIZE/2;
+            double sx = t.getX() * tileSize - cameraX + tileSize/2;
+            double sy = t.getY() * tileSize - cameraY + tileSize/2;
             
             String color;
-            switch (t.type) {
+            switch (t.getType()) {
                 case SPIKES: color = "#ef4444"; break;
                 case POISON: color = "#22c55e"; break;
                 default: color = "#ef4444";
@@ -1139,52 +1210,60 @@ public class GameView {
         // Draw enemies
         for (Enemy e : engine.getEnemies()) {
             // Skip invisible enemies that are not visible
-            if (e.type == EnemyType.INVISIBLE && !e.visible) continue;
-            
-            double sx = e.visualX * TILE_SIZE - cameraX + TILE_SIZE/2;
-            double sy = e.visualY * TILE_SIZE - cameraY + TILE_SIZE/2;
-            double size = e.type == EnemyType.BOSS ? 44 : e.type == EnemyType.TANK ? 32 : 24;
-            
+            if (e.getType() == EnemyType.INVISIBLE && !e.isVisible()) continue;
+
+            double sx = e.getVisualX() * tileSize - cameraX + tileSize/2;
+            double sy = e.getVisualY() * tileSize - cameraY + tileSize/2;
+            double size = e.getType() == EnemyType.BOSS ? 44 : e.getType() == EnemyType.TANK ? 32 : 24;
+
             // Color based on enemy type - tan/beige for normal, colors for special
             String bodyColor, glowColor;
-            switch (e.type) {
-                case CHASER: bodyColor = "#d4a574"; glowColor = "#22c55e"; break;   // Tan with green glow
-                case SHOOTER: bodyColor = "#e8c090"; glowColor = "#f59e0b"; break;  // Beige with orange glow
-                case TANK: bodyColor = "#8b7355"; glowColor = "#6b7280"; break;     // Brown with gray glow
-                case TELEPORTER: bodyColor = "#c4b0d4"; glowColor = "#a855f7"; break; // Light purple
+            switch (e.getType()) {
+                case CHASER: bodyColor = "#d4a574"; glowColor = "#22c55e"; break;
+                case SHOOTER: bodyColor = "#e8c090"; glowColor = "#f59e0b"; break;
+                case TANK: bodyColor = "#8b7355"; glowColor = "#6b7280"; break;
+                case TELEPORTER: bodyColor = "#c4b0d4"; glowColor = "#a855f7"; break;
                 case INVISIBLE: bodyColor = "#9ca3af"; glowColor = "#6b7280"; break;
-                case SUMMONER: bodyColor = "#e8a4c4"; glowColor = "#ec4899"; break;  // Pink
-                case BOSS: bodyColor = "#ff6b6b"; glowColor = "#ef4444"; break;      // Red
+                case SUMMONER: bodyColor = "#e8a4c4"; glowColor = "#ec4899"; break;
+                case BOSS: bodyColor = "#ff6b6b"; glowColor = "#ef4444"; break;
                 default: bodyColor = "#d4a574"; glowColor = "#f97316";
             }
-            
+
             // Shadow
             gc.setFill(Color.web("#000", 0.25));
             gc.fillOval(sx - size/2 + 3, sy + size/3, size - 2, size/4);
-            
+
+            // Enhanced boss outline
+            if (e.getType() == EnemyType.BOSS) {
+                double outlinePulse = 0.5 + 0.5 * Math.sin(time * 4);
+                gc.setStroke(Color.web("#ef4444", 0.7 * outlinePulse + 0.3));
+                gc.setLineWidth(6 + 2 * outlinePulse);
+                gc.strokeOval(sx - size/2 - 8, sy - size/2 - 8, size + 16, size + 16);
+            }
+
             // Outer glow
             gc.setFill(Color.web(glowColor, 0.2));
             gc.fillOval(sx - size/2 - 4, sy - size/2 - 4, size + 8, size + 8);
-            
+
             // Body with gradient
             RadialGradient enemyGrad = new RadialGradient(0, 0, 0.3, 0.3, 1, true, CycleMethod.NO_CYCLE,
-                new Stop(0, e.hit ? Color.WHITE : Color.web(bodyColor).brighter()),
-                new Stop(0.7, e.hit ? Color.web("#dddddd") : Color.web(bodyColor)),
-                new Stop(1, e.hit ? Color.web("#aaaaaa") : Color.web(bodyColor).darker())
+                new Stop(0, e.isHit() ? Color.WHITE : Color.web(bodyColor).brighter()),
+                new Stop(0.7, e.isHit() ? Color.web("#dddddd") : Color.web(bodyColor)),
+                new Stop(1, e.isHit() ? Color.web("#aaaaaa") : Color.web(bodyColor).darker())
             );
             gc.setFill(enemyGrad);
             gc.fillOval(sx - size/2, sy - size/2, size, size);
-            
+
             // Eye
-            double eyeX = sx + Math.cos(e.angle) * size/5;
-            double eyeY = sy + Math.sin(e.angle) * size/5;
+            double eyeX = sx + Math.cos(e.getAngle()) * size/5;
+            double eyeY = sy + Math.sin(e.getAngle()) * size/5;
             gc.setFill(Color.WHITE);
             gc.fillOval(eyeX - 4, eyeY - 4, 8, 8);
             gc.setFill(Color.web("#1a1a1a"));
             gc.fillOval(eyeX - 2, eyeY - 2, 4, 4);
-            
+
             // Health bar (only for damaged enemies)
-            double hpPct = (double)e.health / e.maxHealth;
+            double hpPct = (double)e.getHealth() / e.getMaxHealth();
             if (hpPct < 1.0) {
                 gc.setFill(Color.web("#1a2a25", 0.9));
                 gc.fillRoundRect(sx - size/2, sy - size/2 - 10, size, 5, 2, 2);
@@ -1195,37 +1274,37 @@ public class GameView {
         
         // Draw projectiles
         for (Projectile p : engine.getProjectiles()) {
-            double sx = p.x * TILE_SIZE - cameraX;
-            double sy = p.y * TILE_SIZE - cameraY;
+            double sx = p.getX() * tileSize - cameraX;
+            double sy = p.getY() * tileSize - cameraY;
             
             // Trail
-            gc.setStroke(Color.web(p.isPlayer ? "#22c55e" : "#ef4444", 0.4));
+            gc.setStroke(Color.web(p.isPlayer() ? "#22c55e" : "#ef4444", 0.4));
             gc.setLineWidth(2);
-            for (int i = 0; i < p.trail.size() - 1; i++) {
-                double[] t1 = p.trail.get(i);
-                double[] t2 = p.trail.get(i + 1);
-                gc.setGlobalAlpha((double)i / p.trail.size() * 0.5);
-                gc.strokeLine(t1[0]*TILE_SIZE-cameraX, t1[1]*TILE_SIZE-cameraY, 
-                              t2[0]*TILE_SIZE-cameraX, t2[1]*TILE_SIZE-cameraY);
+            for (int i = 0; i < p.getTrail().size() - 1; i++) {
+                double[] t1 = p.getTrail().get(i);
+                double[] t2 = p.getTrail().get(i + 1);
+                gc.setGlobalAlpha((double)i / p.getTrail().size() * 0.5);
+                gc.strokeLine(t1[0]*tileSize-cameraX, t1[1]*tileSize-cameraY, 
+                              t2[0]*tileSize-cameraX, t2[1]*tileSize-cameraY);
             }
             gc.setGlobalAlpha(1);
             
             // Bullet glow
-            gc.setFill(Color.web(p.isPlayer ? "#22c55e" : "#ef4444", 0.3));
+            gc.setFill(Color.web(p.isPlayer() ? "#22c55e" : "#ef4444", 0.3));
             gc.fillOval(sx - 8, sy - 8, 16, 16);
             // Bullet core
-            gc.setFill(Color.web(p.isPlayer ? "#22c55e" : "#ef4444"));
+            gc.setFill(Color.web(p.isPlayer() ? "#22c55e" : "#ef4444"));
             gc.fillOval(sx - 4, sy - 4, 8, 8);
         }
         
         // Draw particles
         for (Particle p : engine.getParticles()) {
-            double sx = p.x * TILE_SIZE - cameraX;
-            double sy = p.y * TILE_SIZE - cameraY;
-            double alpha = p.life / 60.0;
+            double sx = p.getX() * tileSize - cameraX;
+            double sy = p.getY() * tileSize - cameraY;
+            double alpha = p.getLife() / 60.0;
             
             String color;
-            switch (p.type) {
+            switch (p.getType()) {
                 case "hit": color = "#ffd700"; break;
                 case "explosion": color = "#ff6b6b"; break;
                 case "damage": color = "#ef4444"; break;
@@ -1235,37 +1314,39 @@ public class GameView {
             }
             
             gc.setFill(Color.web(color, alpha));
-            gc.fillOval(sx - p.size/2, sy - p.size/2, p.size, p.size);
+            gc.fillOval(sx - p.getSize()/2, sy - p.getSize()/2, p.getSize(), p.getSize());
         }
         
         // Draw damage numbers
         for (DamageNumber d : engine.getDamageNumbers()) {
-            double sx = d.x * TILE_SIZE - cameraX;
-            double sy = d.y * TILE_SIZE - cameraY;
-            double alpha = d.life / 40.0;
+            double sx = d.getX() * tileSize - cameraX;
+            double sy = d.getY() * tileSize - cameraY;
+            double alpha = d.getLife() / 40.0;
             
             gc.setGlobalAlpha(alpha);
-            gc.setFont(Font.font("Arial Black", d.crit ? 22 : 16));
-            gc.setFill(d.crit ? Color.web("#ffd700") : Color.WHITE);
-            gc.fillText((d.crit ? "CRIT! " : "") + d.damage, sx, sy);
+            gc.setFont(Font.font("Arial Black", d.isCrit() ? 22 : 16));
+            gc.setFill(d.isCrit() ? Color.web("#ffd700") : Color.WHITE);
+            gc.fillText((d.isCrit() ? "CRIT! " : "") + d.getDamage(), sx, sy);
             gc.setGlobalAlpha(1);
         }
         
         // Draw player - white/light circle with glow like reference
-        double px = player.getVisualX() * TILE_SIZE - cameraX + TILE_SIZE/2;
-        double py = player.getVisualY() * TILE_SIZE - cameraY + TILE_SIZE/2;
-        
+        double px = player.getVisualX() * tileSize - cameraX + tileSize/2;
+        double py = player.getVisualY() * tileSize - cameraY + tileSize/2;
+
         if (!player.isInvincible() || (int)(time * 20) % 2 == 0) {
             // Shadow
             gc.setFill(Color.web("#000", 0.3));
             gc.fillOval(px - 12 + 3, py + 8, 24, 8);
-            
-            // Outer glow (cyan/teal)
-            gc.setFill(Color.web("#22c55e", 0.15));
+
+            // Enhanced pulsing glow for invincible/ability
+            double glowAlpha = player.isInvincible() ? (0.25 + 0.15 * Math.sin(time * 8)) : 0.15;
+            Color glowColor = player.isInvincible() ? Color.web("#fbbf24") : Color.web("#22c55e");
+            gc.setFill(glowColor.deriveColor(0, 1, 1, glowAlpha));
             gc.fillOval(px - 30, py - 30, 60, 60);
-            gc.setFill(Color.web("#22c55e", 0.25));
+            gc.setFill(glowColor.deriveColor(0, 1, 1, glowAlpha + 0.1));
             gc.fillOval(px - 22, py - 22, 44, 44);
-            
+
             // Main body - white/light with gradient
             RadialGradient playerGrad = new RadialGradient(0, 0, 0.3, 0.3, 1, true, CycleMethod.NO_CYCLE,
                 new Stop(0, Color.web("#ffffff")),
@@ -1274,11 +1355,11 @@ public class GameView {
             );
             gc.setFill(playerGrad);
             gc.fillOval(px - 16, py - 16, 32, 32);
-            
+
             // Inner highlight
             gc.setFill(Color.web("#ffffff", 0.7));
             gc.fillOval(px - 10, py - 12, 10, 7);
-            
+
             // Health bar above player
             double barWidth = 36;
             double hpPct = player.getHealth() / 100.0;
@@ -1286,7 +1367,7 @@ public class GameView {
             gc.fillRoundRect(px - barWidth/2 - 2, py - 32, barWidth + 4, 8, 4, 4);
             gc.setFill(Color.web("#22c55e"));
             gc.fillRoundRect(px - barWidth/2, py - 30, barWidth * hpPct, 4, 2, 2);
-            
+
             // Shield indicator
             if (player.getShield() > 0) {
                 gc.setStroke(Color.web("#3b82f6", 0.8));
@@ -1318,7 +1399,7 @@ public class GameView {
         // Screen effects
         for (ScreenEffect e : screenEffects) {
             gc.setFill(Color.web(e.color, e.life / 30.0 * 0.3));
-            gc.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            gc.fillRect(0, 0, gameWidth, gameHeight);
         }
         
         // Vignette
@@ -1327,7 +1408,7 @@ public class GameView {
             new Stop(1, Color.web("#000", 0.6))
         );
         gc.setFill(vignette);
-        gc.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        gc.fillRect(0, 0, gameWidth, gameHeight);
     }
     
     private void showGameOver() {
@@ -1462,8 +1543,9 @@ public class GameView {
         
         FloatingText(String text, double x, double y, Color color) {
             this.text = text;
-            this.x = x;
-            this.y = y;
+            // Clamp initial position to screen bounds
+            this.x = Math.max(20, Math.min(x, gameWidth - 100));
+            this.y = Math.max(20, Math.min(y, gameHeight - 20));
             this.color = color;
             this.size = 20;
             this.maxLife = 120; // 2 seconds at 60fps
@@ -1478,6 +1560,12 @@ public class GameView {
             vy += 0.1; // gravity
             life--;
             size = 20 * (life / maxLife);
+            
+            // Clamp to screen bounds
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x > gameWidth - 50) x = gameWidth - 50;
+            if (y > gameHeight - 20) y = gameHeight - 20;
         }
         
         boolean isDead() { return life <= 0; }
@@ -1565,55 +1653,34 @@ public class GameView {
             gc.save();
             gc.setGlobalAlpha(alpha);
             
+            // Position notification at top-center of canvas, below HUD area
+            double notifWidth = 450;
+            double notifHeight = 70;
+            double notifX = (gameWidth - notifWidth) / 2;
+            double notifY = 10 + yOffset + 50; // Offset from top, slides in from above
+            
             // Background
             gc.setFill(Color.web("#1a1a2e", 0.9));
-            gc.fillRoundRect(50, yOffset, 500, 80, 10, 10);
+            gc.fillRoundRect(notifX, notifY, notifWidth, notifHeight, 10, 10);
             gc.setStroke(color);
             gc.setLineWidth(2);
-            gc.strokeRoundRect(50, yOffset, 500, 80, 10, 10);
+            gc.strokeRoundRect(notifX, notifY, notifWidth, notifHeight, 10, 10);
             
             // Title
             gc.setFill(color);
-            gc.setFont(Font.font("Arial Black", FontWeight.BLACK, 18));
-            gc.fillText(title, 70, yOffset + 25);
+            gc.setFont(Font.font("Arial Black", FontWeight.BLACK, 16));
+            gc.fillText(title, notifX + 15, notifY + 25);
             
             // Message
             gc.setFill(Color.web("#cccccc"));
-            gc.setFont(Font.font("Arial", 14));
-            gc.fillText(message, 70, yOffset + 50);
+            gc.setFont(Font.font("Arial", 13));
+            gc.fillText(message, notifX + 15, notifY + 48);
             
             gc.restore();
         }
     }
 
-    private class MiniMap {
-        private Canvas mapCanvas;
-        private double mapSize = 150;
-        
-        MiniMap() {
-            mapCanvas = new Canvas(mapSize, mapSize);
-        }
-        
-        void update() {
-            GraphicsContext mgc = mapCanvas.getGraphicsContext2D();
-            mgc.clearRect(0, 0, mapSize, mapSize);
-            
-            // Background
-            mgc.setFill(Color.web("#1a1a2e", 0.8));
-            mgc.fillRect(0, 0, mapSize, mapSize);
-            mgc.setStroke(Color.web("#00ffff", 0.5));
-            mgc.strokeRect(0, 0, mapSize, mapSize);
-            
-            // Draw map (simplified representation)
-            // This would normally show the actual game map
-            mgc.setFill(NEON_CYAN);
-            mgc.fillOval(mapSize/2 - 3, mapSize/2 - 3, 6, 6);
-        }
-        
-        void render() {
-            gc.drawImage(mapCanvas.snapshot(null, null), GAME_WIDTH - mapSize - 20, 20);
-        }
-    }
+    // Removed MiniMap class (extra minimap overlay)
 
     private class TimelineShiftIndicator {
         private double shiftProgress = 0;
@@ -1640,21 +1707,15 @@ public class GameView {
         }
         
         void render() {
+            // Only show shift effect when transitioning timelines
             if (isShifting) {
                 double alpha = Math.sin(shiftProgress * Math.PI) * 0.5;
                 gc.save();
                 gc.setGlobalAlpha(alpha);
                 gc.setFill(Color.web("#00ffff"));
-                gc.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                gc.fillRect(0, 0, gameWidth, gameHeight);
                 gc.restore();
             }
-            
-            // Timeline indicator
-            gc.save();
-            gc.setFill(Color.web("#00ffff", 0.8));
-            gc.setFont(Font.font("Courier New", FontWeight.BOLD, 16));
-            gc.fillText("TIMELINE: " + currentTimeline, GAME_WIDTH - 200, GAME_HEIGHT - 50);
-            gc.restore();
         }
     }
 
@@ -1672,7 +1733,7 @@ public class GameView {
             
             // Add particles for combo
             for (int i = 0; i < 10; i++) {
-                particleEffects.add(new ParticleEffect(GAME_WIDTH/2, GAME_HEIGHT/2, NEON_PURPLE));
+                particleEffects.add(new ParticleEffect(gameWidth/2, gameHeight/2, NEON_PURPLE));
             }
         }
         
@@ -1692,12 +1753,12 @@ public class GameView {
                 gc.setFill(NEON_PURPLE);
                 gc.setFont(Font.font("Arial Black", FontWeight.BLACK, 24 * comboScale));
                 String comboText = currentCombo + "x COMBO!";
-                gc.fillText(comboText, GAME_WIDTH/2 - 100, GAME_HEIGHT/2);
+                gc.fillText(comboText, gameWidth/2 - 100, gameHeight/2);
                 
                 // Glow
                 gc.setGlobalAlpha(0.4);
                 gc.setFill(Color.WHITE);
-                gc.fillText(comboText, GAME_WIDTH/2 - 99, GAME_HEIGHT/2 - 1);
+                gc.fillText(comboText, gameWidth/2 - 99, gameHeight/2 - 1);
                 gc.restore();
             }
         }
@@ -1796,7 +1857,7 @@ public class GameView {
         notifications.forEach(Notification::update);
         
         // Update enhanced systems
-        if (miniMap != null) miniMap.update();
+        // if (miniMap != null) miniMap.update(); // Removed extra minimap overlay
         if (timelineIndicator != null) timelineIndicator.update();
         if (comboSystem != null) comboSystem.update();
         if (powerUpDisplay != null) powerUpDisplay.update();
@@ -1817,7 +1878,7 @@ public class GameView {
         notifications.forEach(Notification::render);
         
         // Render enhanced systems
-        if (miniMap != null) miniMap.render();
+        // if (miniMap != null) miniMap.render(); // Removed extra minimap overlay
         if (timelineIndicator != null) timelineIndicator.render();
         if (comboSystem != null) comboSystem.render();
         if (powerUpDisplay != null) powerUpDisplay.render();
@@ -1828,7 +1889,7 @@ public class GameView {
 
     // Initialize enhanced features
     private void initEnhancedFeatures() {
-        miniMap = new MiniMap();
+        // miniMap = new MiniMap(); // Removed extra minimap overlay
         timelineIndicator = new TimelineShiftIndicator();
         comboSystem = new ComboSystem();
         powerUpDisplay = new PowerUpDisplay();
@@ -1836,8 +1897,8 @@ public class GameView {
         bossHealthBar = new BossHealthBar();
         damageIndicators = new DamageIndicatorSystem();
         
-        // Add welcome notification
-        addNotification("Welcome to ChronoGrid!", "WASD=Move, Mouse=Aim, Click=Shoot, Q=Ultimate, RMB=Dash", NEON_CYAN);
+        // Add welcome notification with keyboard controls
+        addNotification("Welcome to ChronoGrid!", "WASD=Move, Arrows=Aim, SPACE=Shoot, SHIFT=Dash, Q=Ultimate", NEON_CYAN);
     }
     
     // === NEW FEATURE CLASSES ===
@@ -1903,16 +1964,16 @@ public class GameView {
                 
                 // Glow effect
                 gc.setFill(Color.web("#ffd700", 0.3));
-                gc.fillText(streakText, GAME_WIDTH/2 - 70, 60);
+                gc.fillText(streakText, gameWidth/2 - 70, 60);
                 
                 gc.setFill(NEON_GOLD);
-                gc.fillText(streakText, GAME_WIDTH/2 - 72, 58);
+                gc.fillText(streakText, gameWidth/2 - 72, 58);
                 
                 // Title below
                 if (!currentTitle.isEmpty()) {
                     gc.setFont(Font.font("Arial Black", 16));
                     gc.setFill(NEON_RED);
-                    gc.fillText(currentTitle, GAME_WIDTH/2 - 60, 82);
+                    gc.fillText(currentTitle, gameWidth/2 - 60, 82);
                 }
                 
                 gc.restore();
@@ -1928,14 +1989,14 @@ public class GameView {
             // Find active boss
             currentBoss = null;
             for (Enemy e : engine.getEnemies()) {
-                if (e.type == EnemyType.BOSS) {
+                if (e.getType() == EnemyType.BOSS) {
                     currentBoss = e;
                     break;
                 }
             }
             
             if (currentBoss != null) {
-                double targetHealth = (double) currentBoss.health / currentBoss.maxHealth;
+                double targetHealth = (double) currentBoss.getHealth() / currentBoss.getMaxHealth();
                 displayHealth += (targetHealth - displayHealth) * 0.1;
             }
         }
@@ -1946,8 +2007,8 @@ public class GameView {
                 
                 double barWidth = 400;
                 double barHeight = 20;
-                double barX = (GAME_WIDTH - barWidth) / 2;
-                double barY = GAME_HEIGHT - 60;
+                double barX = (gameWidth - barWidth) / 2;
+                double barY = gameHeight - 60;
                 
                 // Background
                 gc.setFill(Color.web("#1a1a2e", 0.9));

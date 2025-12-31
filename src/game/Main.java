@@ -13,6 +13,8 @@ public class Main extends Application {
     }
 
     public static void main(String[] args) {
+        // DPI / Scaling Fix for Windows
+        System.setProperty("prism.allowhidpi", "false");
         launch(args);
     }
 }

@@ -38,7 +38,7 @@ public class MapGenerator {
         }
         
         // Ensure start and end are walkable
-        map.getNode(0, 0).setWalkable(true);
+        map.getNode(0, 0).setWalkable(true);    
         map.getNode(width - 1, height - 1).setWalkable(true);
         
         return map;
