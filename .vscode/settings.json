@@ -1,0 +1,6 @@
+{
+    "chat.agent.maxRequests": 1000000,
+    "java.project.referencedLibraries": [
+        "javafx-sdk-21.0.4/lib/*.jar"
+    ]
+}
