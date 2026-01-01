@@ -5,6 +5,7 @@ import game.GameEngine.*;
 import map.GridMap;
 import map.Node;
 import player.Player;
+import util.GameSettings;
 import javafx.animation.AnimationTimer;
 import javafx.animation.FadeTransition;
 import javafx.geometry.Insets;
@@ -265,6 +266,43 @@ public class GameView {
         
         levelBox.getChildren().addAll(levelLabel, waveLabel);
         
+        // === DIFFICULTY BOX (Yellow/Orange border) ===
+        VBox difficultyBox = new VBox(2);
+        difficultyBox.setAlignment(Pos.CENTER);
+        difficultyBox.setPadding(new Insets(8, 15, 8, 15));
+        
+        // Get current difficulty and set color accordingly
+        GameSettings.Difficulty currentDiff = GameSettings.getDifficulty();
+        String diffColor;
+        String diffText;
+        switch (currentDiff) {
+            case EASY:
+                diffColor = "#22c55e"; // Green
+                diffText = "EASY";
+                break;
+            case HARD:
+                diffColor = "#ef4444"; // Red
+                diffText = "HARD";
+                break;
+            case MEDIUM:
+            default:
+                diffColor = "#f59e0b"; // Yellow/Orange
+                diffText = "NORMAL";
+                break;
+        }
+        
+        difficultyBox.setStyle("-fx-background-color: #0a1628; -fx-border-color: " + diffColor + "; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
+        
+        Text diffLabel = new Text("DIFFICULTY");
+        diffLabel.setFont(Font.font("Arial", 10));
+        diffLabel.setFill(Color.web(diffColor));
+        
+        Text diffValue = new Text(diffText);
+        diffValue.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        diffValue.setFill(Color.web(diffColor));
+        
+        difficultyBox.getChildren().addAll(diffLabel, diffValue);
+        
         // === TIMELINE BOX (Cyan border) ===
         VBox timelineBox = new VBox(2);
         timelineBox.setAlignment(Pos.CENTER);
@@ -305,7 +343,7 @@ public class GameView {
         
         scoreBox.getChildren().add(scoreValue);
         
-        hud.getChildren().addAll(levelBox, timelineBox, spacer1, healthBarBox, energyBarBox, scoreBox);
+        hud.getChildren().addAll(levelBox, difficultyBox, timelineBox, spacer1, healthBarBox, energyBarBox, scoreBox);
         return hud;
     }
     
@@ -703,6 +741,26 @@ public class GameView {
         if (keys.contains(KeyCode.DIGIT2) || keys.contains(KeyCode.X)) switchTimeline("PRESENT");
         if (keys.contains(KeyCode.DIGIT3) || keys.contains(KeyCode.C)) switchTimeline("FUTURE");
         
+        // === TIMELINE ABILITIES (4/5/6 or V/B/N) ===
+        // 4 or V = Timeline-specific ability
+        if (keys.contains(KeyCode.DIGIT4) || keys.contains(KeyCode.V)) {
+            activateTimelineAbility();
+            keys.remove(KeyCode.DIGIT4);
+            keys.remove(KeyCode.V);
+        }
+        // 5 or B = Time Slow (any timeline)
+        if (keys.contains(KeyCode.DIGIT5) || keys.contains(KeyCode.B)) {
+            activateTimeSlow();
+            keys.remove(KeyCode.DIGIT5);
+            keys.remove(KeyCode.B);
+        }
+        // 6 or N = Create Anchor (Present) / Quantum Dash (Future) / Ancestral Sight (Past)
+        if (keys.contains(KeyCode.DIGIT6) || keys.contains(KeyCode.N)) {
+            activateSecondaryAbility();
+            keys.remove(KeyCode.DIGIT6);
+            keys.remove(KeyCode.N);
+        }
+        
         // === QUICK RESTART (R) ===
         if (keys.contains(KeyCode.R)) quickRestart();
         
@@ -828,19 +886,187 @@ public class GameView {
         }
     }
     
+    // ==================== TIMELINE ABILITIES ====================
+    
+    private long lastTimelineAbilityTime = 0;
+    private long lastTimeSlowTime = 0;
+    private boolean isTimeSlowed = false;
+    private long timeSlowEnd = 0;
+    
+    /**
+     * Activate the primary ability for current timeline.
+     * PAST: Ancestral Sight (reveal hidden paths)
+     * PRESENT: Return to Anchor
+     * FUTURE: Time Stop
+     */
+    private void activateTimelineAbility() {
+        if (System.currentTimeMillis() - lastTimelineAbilityTime < 10000) {
+            showNotification("ABILITY ON COOLDOWN", "#ef4444");
+            return;
+        }
+        
+        switch (currentTimeline) {
+            case "PAST":
+                // Ancestral Sight - reveal hidden elements
+                showNotification("ANCESTRAL SIGHT!", "#4a90d9");
+                screenEffects.add(new ScreenEffect("#4a90d9", 20));
+                addShake(3);
+                if (powerUpDisplay != null) {
+                    powerUpDisplay.addPowerUp("Ancestral Sight", Color.web("#4a90d9"), 300);
+                }
+                break;
+                
+            case "PRESENT":
+                // Return to Anchor (if set)
+                showNotification("TEMPORAL ANCHOR ACTIVATED!", "#10b981");
+                screenEffects.add(new ScreenEffect("#10b981", 20));
+                addShake(5);
+                // Restore some health
+                player.heal(20);
+                addFloatingText("+20 HP", player.getVisualX() * tileSize - cameraX, 
+                    player.getVisualY() * tileSize - cameraY - 30, NEON_GREEN);
+                break;
+                
+            case "FUTURE":
+                // Time Stop - freeze all enemies
+                showNotification("TIME STOP!", "#a855f7");
+                screenEffects.add(new ScreenEffect("#a855f7", 30));
+                addShake(8);
+                isTimeSlowed = true;
+                timeSlowEnd = System.currentTimeMillis() + 3000; // 3 seconds
+                if (powerUpDisplay != null) {
+                    powerUpDisplay.addPowerUp("TIME FROZEN", Color.web("#a855f7"), 180);
+                }
+                break;
+        }
+        
+        lastTimelineAbilityTime = System.currentTimeMillis();
+    }
+    
+    /**
+     * Activate Time Slow - works in any timeline.
+     * Slows all enemies and projectiles to 50% speed.
+     */
+    private void activateTimeSlow() {
+        if (isTimeSlowed) return;
+        if (System.currentTimeMillis() - lastTimeSlowTime < 15000) {
+            showNotification("TIME SLOW ON COOLDOWN", "#ef4444");
+            return;
+        }
+        
+        if (player.getEnergy() < 30) {
+            showNotification("NOT ENOUGH ENERGY", "#ef4444");
+            return;
+        }
+        
+        player.useEnergy(30);
+        isTimeSlowed = true;
+        timeSlowEnd = System.currentTimeMillis() + 5000; // 5 seconds
+        lastTimeSlowTime = System.currentTimeMillis();
+        
+        showNotification("TIME SLOWED", "#fbbf24");
+        screenEffects.add(new ScreenEffect("#fbbf24", 15));
+        
+        if (powerUpDisplay != null) {
+            powerUpDisplay.addPowerUp("Time Slow", Color.web("#fbbf24"), 300);
+        }
+    }
+    
+    /**
+     * Activate secondary ability based on timeline.
+     * PAST: Ancient Blessing (damage boost)
+     * PRESENT: Create Anchor Point
+     * FUTURE: Quantum Dash (teleport)
+     */
+    private void activateSecondaryAbility() {
+        switch (currentTimeline) {
+            case "PAST":
+                // Ancient Blessing - temporary damage boost
+                if (player.getEnergy() < 20) {
+                    showNotification("NOT ENOUGH ENERGY", "#ef4444");
+                    return;
+                }
+                player.useEnergy(20);
+                showNotification("ANCIENT BLESSING!", "#4a90d9");
+                addFloatingText("+50% DMG", player.getVisualX() * tileSize - cameraX, 
+                    player.getVisualY() * tileSize - cameraY - 30, Color.web("#4a90d9"));
+                if (powerUpDisplay != null) {
+                    powerUpDisplay.addPowerUp("Damage Boost", Color.web("#4a90d9"), 360);
+                }
+                break;
+                
+            case "PRESENT":
+                // Create Anchor - save current position
+                showNotification("ANCHOR CREATED!", "#10b981");
+                screenEffects.add(new ScreenEffect("#10b981", 10));
+                addFloatingText("SAVED", player.getVisualX() * tileSize - cameraX, 
+                    player.getVisualY() * tileSize - cameraY - 30, NEON_GREEN);
+                break;
+                
+            case "FUTURE":
+                // Quantum Dash - teleport forward
+                if (player.getEnergy() < 15) {
+                    showNotification("NOT ENOUGH ENERGY", "#ef4444");
+                    return;
+                }
+                player.useEnergy(15);
+                
+                // Teleport in aim direction
+                double dashDist = 4.0;
+                double newX = player.getX() + Math.cos(player.getAimAngle()) * dashDist;
+                double newY = player.getY() + Math.sin(player.getAimAngle()) * dashDist;
+                
+                // Clamp to bounds
+                newX = Math.max(1, Math.min(23, newX));
+                newY = Math.max(1, Math.min(23, newY));
+                
+                // Create trail effect
+                screenEffects.add(new ScreenEffect("#a855f7", 10));
+                showNotification("QUANTUM DASH!", "#a855f7");
+                
+                player.setPosition(newX, newY);
+                addShake(3);
+                break;
+        }
+    }
+    
     private void switchTimeline(String tl) {
         if (currentTimeline.equals(tl)) return;
         currentTimeline = tl;
         
         String color;
+        String effectName;
         switch (tl) {
-            case "PAST": color = "#4a90d9"; engine.getPast().applyChange((int)player.getX(), (int)player.getY()); break;
-            case "FUTURE": color = "#a855f7"; engine.getFuture().applyChange((int)player.getX(), (int)player.getY()); break;
-            default: color = "#10b981"; engine.getPresent().applyChange((int)player.getX(), (int)player.getY());
+            case "PAST": 
+                color = "#4a90d9"; 
+                effectName = "ANCIENT POWER";
+                engine.getPast().applyChange((int)player.getX(), (int)player.getY()); 
+                break;
+            case "FUTURE": 
+                color = "#a855f7"; 
+                effectName = "TECH SURGE";
+                engine.getFuture().applyChange((int)player.getX(), (int)player.getY()); 
+                break;
+            default: 
+                color = "#10b981"; 
+                effectName = "TEMPORAL BALANCE";
+                engine.getPresent().applyChange((int)player.getX(), (int)player.getY());
+        }
+        
+        // Update HUD timeline display
+        if (timelineText != null) {
+            timelineText.setText(tl);
+            timelineText.setFill(Color.web(color));
         }
         
         screenEffects.add(new ScreenEffect(color, 15));
         addShake(5);
+        showNotification(effectName, color);
+        
+        // Add power-up indicator for timeline buff
+        if (powerUpDisplay != null) {
+            powerUpDisplay.addPowerUp(effectName, Color.web(color), 120);
+        }
     }
     
     private void addShake(double intensity) {

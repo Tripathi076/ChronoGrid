@@ -7,6 +7,8 @@ import timeline.Present;
 import timeline.Future;
 import java.util.*;
 import util.GameSettings;
+import util.DifficultyConfig;
+import util.EnemyStats;
 
 public class GameEngine {
         // Remove old difficulty string, use GameSettings instead
@@ -50,17 +52,15 @@ public class GameEngine {
 		spawnEnemies(getEnemyCountForLevel(wave));
         }
 
-    // Get enemy count based on difficulty and level (wave)
+    /**
+     * Get enemy spawn count based on difficulty and level (wave).
+     * Delegates to DifficultyConfig for centralized scaling logic.
+     * 
+     * @param level Current wave/level number
+     * @return Number of enemies to spawn
+     */
     private int getEnemyCountForLevel(int level) {
-        GameSettings.Difficulty difficulty = GameSettings.getDifficulty();
-        int baseCount;
-        switch (difficulty) {
-            case EASY: baseCount = 3; break;
-            case HARD: baseCount = 8; break;
-            default: baseCount = 5; // MEDIUM or fallback
-        }
-        // Increase enemy count as level increases
-        return baseCount + (level - 1); // +1 enemy per level
+        return DifficultyConfig.getSpawnCount(GameSettings.getDifficulty(), level);
     }
     
     private void generateMap() {
@@ -387,13 +387,31 @@ public class GameEngine {
         HEALTH, ENERGY, AMMO, SHIELD, SPEED_BOOST, DAMAGE_BOOST, INVINCIBILITY, TIME_SLOW, TELEPORT
     }
     
+    /**
+     * Enemy class with scalable stats based on difficulty and level.
+     * 
+     * Stats are computed at construction time using the EnemyStats helper,
+     * which applies both difficulty multipliers and level-based scaling.
+     * 
+     * Responsibilities:
+     * - Store enemy state (position, health, type, etc.)
+     * - Handle enemy behavior (movement, combat, special abilities)
+     * - Use final scaled stats from EnemyStats for gameplay
+     */
     public static class Enemy {
+        // Position
         private double x;
         private double y;
         private double visualX;
         private double visualY;
+        
+        // Stats (scaled)
         private int health;
         private int maxHealth;
+        private int scaledDamage;
+        private double scaledSpeed;
+        
+        // Type and state
         private EnemyType type;
         private double angle = 0;
         private long lastShot = 0;
@@ -404,59 +422,82 @@ public class GameEngine {
         private boolean visible = true;
         private long lastVisibilityChange = 0;
         private int bossPhase = 1;
+        
+        // Store the level this enemy was created at (useful for debugging/display)
+        private int spawnLevel;
 
-        private int scaledDamage = 0;
-        private double scaledSpeed = 0;
-
-        // New constructor: applies difficulty and level scaling
+        /**
+         * Creates an enemy with stats scaled by difficulty and level.
+         * 
+         * @param x Initial X position
+         * @param y Initial Y position
+         * @param type The enemy type (defines base stats)
+         * @param level Current game level/wave for scaling
+         */
         public Enemy(int x, int y, EnemyType type, int level) {
             this.x = x;
             this.y = y;
             this.visualX = x;
             this.visualY = y;
             this.type = type;
+            this.spawnLevel = level;
             applyDifficultyAndLevelScaling(level);
         }
-        // For compatibility (if needed)
+        
+        /**
+         * Creates an enemy at level 1 (for compatibility and summoned enemies).
+         * Summoned enemies use level 1 to avoid excessive scaling.
+         */
         public Enemy(int x, int y, EnemyType type) {
             this(x, y, type, 1);
         }
 
-        // Applies difficulty and level scaling to enemy stats
+        /**
+         * Applies difficulty and level scaling to enemy stats.
+         * Delegates to EnemyStats for centralized scaling logic.
+         * 
+         * This method is called once at construction time.
+         * The scaled values are stored and used throughout the enemy's lifetime.
+         * 
+         * @param level Current game level/wave
+         */
         private void applyDifficultyAndLevelScaling(int level) {
-            GameSettings.Difficulty difficulty = GameSettings.getDifficulty();
-            // Base stats from type
-            int baseHealth = type.health;
-            int baseDamage = type.damage;
-            double baseSpeed = type.speed;
-
-            // Difficulty multipliers
-            double healthMult, damageMult, speedMult;
-            switch (difficulty) {
-                case EASY:
-                    healthMult = 0.8; damageMult = 0.8; speedMult = 0.9; break;
-                case HARD:
-                    healthMult = 1.3; damageMult = 1.3; speedMult = 1.15; break;
-                default:
-                    healthMult = 1.0; damageMult = 1.0; speedMult = 1.0; break;
-            }
-
-            // Level-based scaling (scales up per level)
-            double levelHealthMult = 1.0 + (level - 1) * 0.15; // 15% more health per level
-            double levelDamageMult = 1.0 + (level - 1) * 0.10; // 10% more damage per level
-            double levelSpeedMult = 1.0 + (level - 1) * 0.05;  // 5% more speed per level
-
-            this.maxHealth = (int)(baseHealth * healthMult * levelHealthMult);
+            // Use EnemyStats helper for clean, centralized scaling
+            EnemyStats stats = EnemyStats.calculate(
+                type.health,   // base health from EnemyType
+                type.damage,   // base damage from EnemyType
+                type.speed,    // base speed from EnemyType
+                level          // current level for scaling
+            );
+            
+            // Apply the computed stats
+            this.maxHealth = stats.getMaxHealth();
             this.health = this.maxHealth;
-            this.scaledDamage = (int)Math.max(1, baseDamage * damageMult * levelDamageMult);
-            this.scaledSpeed = baseSpeed * speedMult * levelSpeedMult;
+            this.scaledDamage = stats.getDamage();
+            this.scaledSpeed = stats.getSpeed();
         }
 
+        /**
+         * Gets the scaled damage value.
+         * This value incorporates both difficulty and level scaling.
+         */
         public int getDamage() {
             return scaledDamage;
         }
+        
+        /**
+         * Gets the scaled speed value.
+         * This value incorporates both difficulty and level scaling.
+         */
         public double getSpeed() {
             return scaledSpeed;
+        }
+        
+        /**
+         * Gets the level at which this enemy was spawned.
+         */
+        public int getSpawnLevel() {
+            return spawnLevel;
         }
         
         // Getters

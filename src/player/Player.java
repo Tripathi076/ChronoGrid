@@ -186,6 +186,10 @@ public class Player implements Serializable, Runnable {
         energy = Math.min(maxEnergy, energy + amount);
     }
     
+    public void useEnergy(int amount) {
+        energy = Math.max(0, energy - amount);
+    }
+    
     public void addAmmo(int amount) {
         ammo = Math.min(maxAmmo, ammo + amount);
     }

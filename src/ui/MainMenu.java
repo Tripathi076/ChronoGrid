@@ -369,18 +369,26 @@ public class MainMenu {
         // Difficulty selector
         HBox difficultyRow = new HBox(20);
         difficultyRow.setAlignment(Pos.CENTER_LEFT);
+        difficultyRow.setPickOnBounds(false);  // Allow clicks to pass through to children
+        
         Text diffLabel = new Text("DIFFICULTY:");
         diffLabel.setFont(Font.font("Courier New", FontWeight.BOLD, 16));
         diffLabel.setFill(NEON_GREEN);
 
         HBox diffButtons = new HBox(10);
+        diffButtons.setPickOnBounds(false);  // Allow clicks to pass through to children
+        
         String[] difficulties = {"EASY", "NORMAL", "HARD", "EXTREME"};
         Color[] diffColors = {NEON_GREEN, NEON_CYAN, NEON_YELLOW, NEON_RED};
+        List<StackPane> diffButtonList = new ArrayList<>();
 
         for (int i = 0; i < difficulties.length; i++) {
             StackPane diffBtn = createSmallButton(difficulties[i], diffColors[i]);
+            diffButtonList.add(diffBtn);
             final int diffIndex = i;
+            
             diffBtn.setOnMouseClicked(e -> {
+                e.consume();  // Consume the event to prevent propagation
                 GameSettings.Difficulty diff;
                 switch (diffIndex) {
                     case 0: diff = GameSettings.Difficulty.EASY; break;
@@ -389,8 +397,49 @@ public class MainMenu {
                     default: diff = GameSettings.Difficulty.MEDIUM;
                 }
                 GameSettings.setDifficulty(diff);
+                
+                // Update visual feedback - highlight selected button with WHITE
+                for (int j = 0; j < diffButtonList.size(); j++) {
+                    StackPane btn = diffButtonList.get(j);
+                    Rectangle btnBg = (Rectangle) btn.getChildren().get(0);
+                    Text btnText = (Text) btn.getChildren().get(1);
+                    if (j == diffIndex) {
+                        // Selected: WHITE text and WHITE border
+                        btnBg.setFill(Color.web("#ffffff", 0.3));
+                        btnBg.setStroke(Color.WHITE);
+                        btnBg.setStrokeWidth(2);
+                        btnText.setFill(Color.WHITE);  // White text
+                    } else {
+                        // Not selected: restore original color
+                        btnBg.setFill(Color.web("#ffffff", 0.1));
+                        btnBg.setStroke(diffColors[j]);
+                        btnBg.setStrokeWidth(1);
+                        btnText.setFill(diffColors[j]);
+                    }
+                }
             });
             diffButtons.getChildren().add(diffBtn);
+        }
+        
+        // Highlight currently selected difficulty on load with WHITE
+        int currentDiffIndex = GameSettings.getDifficulty().ordinal();
+        if (currentDiffIndex < diffButtonList.size()) {
+            for (int j = 0; j < diffButtonList.size(); j++) {
+                StackPane btn = diffButtonList.get(j);
+                Rectangle btnBg = (Rectangle) btn.getChildren().get(0);
+                Text btnText = (Text) btn.getChildren().get(1);
+                if (j == currentDiffIndex) {
+                    btnBg.setFill(Color.web("#ffffff", 0.3));
+                    btnBg.setStroke(Color.WHITE);
+                    btnBg.setStrokeWidth(2);
+                    btnText.setFill(Color.WHITE);  // White text
+                } else {
+                    btnBg.setFill(Color.web("#ffffff", 0.1));
+                    btnBg.setStroke(diffColors[j]);
+                    btnBg.setStrokeWidth(1);
+                    btnText.setFill(diffColors[j]);
+                }
+            }
         }
 
         difficultyRow.getChildren().addAll(diffLabel, diffButtons);
@@ -507,6 +556,8 @@ public class MainMenu {
     private StackPane createSmallButton(String text, Color color) {
         StackPane button = new StackPane();
         button.setPrefSize(80, 30);
+        button.setPickOnBounds(true);  // Enable click on entire button area
+        button.setCursor(javafx.scene.Cursor.HAND);  // Show hand cursor
 
         Rectangle bg = new Rectangle(80, 30);
         bg.setFill(Color.web("#ffffff", 0.1));
@@ -514,10 +565,12 @@ public class MainMenu {
         bg.setStrokeWidth(1);
         bg.setArcWidth(8);
         bg.setArcHeight(8);
+        bg.setMouseTransparent(true);  // Let clicks pass through to StackPane
 
         Text buttonText = new Text(text);
         buttonText.setFont(Font.font("Arial", FontWeight.BOLD, 12));
         buttonText.setFill(color);
+        buttonText.setMouseTransparent(true);  // Let clicks pass through to StackPane
 
         button.setOnMouseEntered(e -> {
             bg.setFill(Color.web("#ffffff", 0.2));
